@@ -14,9 +14,10 @@ class Enhance::Enhancer
   # file_root : root of the server if not the same as root
   def initialize app, root, options = {}
     @app = app
-    @extensions = [options[:extensions]].flatten || %w( jpg png jpeg gif )
+    @extensions = [options[:extensions]].flatten || %w(jpg png jpeg gif)
     @routes = options[:routes] || %w( images )
-    @folders = [options[:folders]].flatten || [File.join(root, "public")]
+    @folders = [options[:folders]].flatten.compact
+    @folders = [File.join(root, "public")] if @folders.blank?
     @quality = options[:quality] || 100
     @command_path = options[:convert_path] || "#{Paperclip.options[:command_path] if defined?(Paperclip)}"
     @command_path += "/" unless @command_path.empty?
@@ -28,6 +29,11 @@ class Enhance::Enhancer
   
   def call env
     matches = env['PATH_INFO'].match /(?<filename>(#{@routes.join("|")}).*(#{@extensions.join("|")}))\/(?<geometry>.*)/i
+
+    env["rack.enhance.folders"] = @folders
+    env["rack.enhance.matches"] = matches
+    env["rack.enhance.file_root"] = @file_root
+
     if matches && !matches['filename'].include?("..")
       dup._call env, matches
     else
@@ -37,11 +43,10 @@ class Enhance::Enhancer
   
   def _call env, matches
     request = @folders.collect_first do |f| 
-      f = File.join(f, matches['filename'])
-      File.exists?(f) ? f : nil
+      file = File.join(f, matches['filename'])
+      File.exists?(file) ? file : nil
     end
-    
-    
+
     if request && (filename = convert(request, matches['filename'], CGI.unescape(matches['geometry']))) && filename.gsub!(/^#{@file_root}/, '')
       env["PATH_INFO"] = filename
       @server.call env
